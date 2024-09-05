@@ -101,26 +101,60 @@ function stopDrawing() {
   ctx.beginPath();
 }
 
-socket.onmessage = (event) => {
-  const action = JSON.parse(event.data);
+function drawAction(action) {
+  ctx.lineWidth = action.isEraser ? 20 : 2;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = action.isEraser ? "#FFFFFF" : action.color;
+  ctx.lineTo(action.x, action.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(action.x, action.y);
+}
 
-  switch (action.type) {
+function calculateStateHash() {
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return Array.from(imageData.data.values())
+    .reduce((acc, val) => acc + val, 0)
+    .toString(16);
+}
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  switch (message.type) {
+    case "HANDSHAKE":
+      socket.send("ACK");
+      break;
+    case "VERIFY":
+      const clientHash = calculateStateHash();
+      if (clientHash !== message.hash) {
+        socket.send("STATE_MISMATCH");
+      }
+      break;
+    case "FULL_STATE":
+      redraw();
+      message.state.forEach(drawAction);
+      break;
     case "Draw":
-      ctx.lineWidth = action.isEraser ? 20 : 2;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = action.isEraser ? "#FFFFFF" : action.color;
-      ctx.lineTo(action.x, action.y);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(action.x, action.y);
+      drawAction(message);
       break;
     case "Clear":
       redraw();
       break;
     case "Zoom":
-      zoom = action.value;
+      zoom = message.value;
       zoomSlider.value = zoom;
       redraw();
       break;
+    default:
+      console.warn("Unknown message type:", message.type);
   }
+};
+
+socket.onerror = (error) => {
+  console.error("WebSocket Error:", error);
+};
+
+socket.onclose = (event) => {
+  console.log("WebSocket connection closed:", event);
 };
