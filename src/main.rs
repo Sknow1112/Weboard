@@ -1,6 +1,6 @@
 mod app;
-mod whiteboard;
 mod websocket;
+mod whiteboard;
 
 use warp::Filter;
 
@@ -14,12 +14,12 @@ async fn main() {
         .and(warp::any().map(move || whiteboard.clone()))
         .and_then(websocket::ws_handler);
 
-    let static_files = warp::fs::dir("static");
-    let index = warp::get().and(warp::path::end()).and(warp::fs::file("static/index.html"));
+    let static_files = warp::path("static").and(warp::fs::dir("static"));
+    let index = warp::get()
+        .and(warp::path::end())
+        .and(warp::fs::file("static/index.html"));
 
-    let routes = websocket_route
-        .or(static_files)
-        .or(index);
+    let routes = websocket_route.or(static_files).or(index);
 
     println!("Server starting on http://0.0.0.0:7860");
     warp::serve(routes).run(([0, 0, 0, 0], 7860)).await;

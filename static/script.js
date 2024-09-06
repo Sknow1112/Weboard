@@ -18,20 +18,50 @@ function resizeCanvases() {
   backgroundCanvas.height = height;
   drawingCanvas.width = width;
   drawingCanvas.height = height;
+
+  // Redraw the background canvas after resizing
+  redrawWhiteboard([]);
 }
 
+// Call resizeCanvases initially and add event listener
 resizeCanvases();
+window.addEventListener("resize", resizeCanvases);
 
-const ws = new WebSocket(`ws://${window.location.host}/ws`);
+let ws;
 
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  if (message.Update) {
-    redrawWhiteboard(message.Update);
-  } else if (message.Clear) {
-    bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
-  }
-};
+function connectWebSocket() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const host = window.location.host;
+  const wsUrl = `${protocol}//${host}/ws`;
+
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    console.log("WebSocket connection established");
+  };
+
+  ws.onerror = (error) => {
+    console.error("WebSocket error:", error);
+  };
+
+  ws.onclose = (event) => {
+    console.log("WebSocket connection closed:", event.code, event.reason);
+    // Attempt to reconnect after a short delay
+    setTimeout(connectWebSocket, 3000);
+  };
+
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.Update) {
+      redrawWhiteboard(message.Update);
+    } else if (message.Clear) {
+      bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
+    }
+  };
+}
+
+// Initial connection
+connectWebSocket();
 
 function redrawWhiteboard(actions) {
   bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
@@ -61,6 +91,11 @@ drawingCanvas.addEventListener("mousedown", startDrawing);
 drawingCanvas.addEventListener("mousemove", draw);
 drawingCanvas.addEventListener("mouseup", stopDrawing);
 drawingCanvas.addEventListener("mouseout", stopDrawing);
+
+// Touch event listeners for mobile support
+drawingCanvas.addEventListener("touchstart", handleTouchStart);
+drawingCanvas.addEventListener("touchmove", handleTouchMove);
+drawingCanvas.addEventListener("touchend", handleTouchEnd);
 
 function startDrawing(e) {
   isDrawing = true;
@@ -103,17 +138,58 @@ function stopDrawing() {
 
 function getPoint(e) {
   const rect = drawingCanvas.getBoundingClientRect();
+  const x = e.clientX || (e.touches && e.touches[0].clientX);
+  const y = e.clientY || (e.touches && e.touches[0].clientY);
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    x: x - rect.left,
+    y: y - rect.top,
   };
+}
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  startDrawing(e.touches[0]);
+}
+
+function handleTouchMove(e) {
+  e.preventDefault();
+  draw(e.touches[0]);
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  stopDrawing();
 }
 
 clearBtn.addEventListener("click", () => {
   ws.send(JSON.stringify({ Clear: null }));
 });
 
-window.addEventListener("resize", () => {
-  resizeCanvases();
-  redrawWhiteboard([]);
-});
+// Prevent scrolling when touching the canvas
+document.body.addEventListener(
+  "touchstart",
+  function (e) {
+    if (e.target == drawingCanvas) {
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
+document.body.addEventListener(
+  "touchend",
+  function (e) {
+    if (e.target == drawingCanvas) {
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
+document.body.addEventListener(
+  "touchmove",
+  function (e) {
+    if (e.target == drawingCanvas) {
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
