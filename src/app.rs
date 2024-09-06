@@ -1,19 +1,26 @@
-use warp::Filter;
-use crate::websocket;
-use crate::database::Database;
-use std::sync::Arc;
-use crate::websocket::WhiteboardState;
+use serde::{Deserialize, Serialize};
 
-pub fn routes(db: Arc<Database>) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    let websocket_route = warp::path("ws")
-        .and(warp::ws())
-        .and(warp::any().map(move || Arc::clone(&db)))
-        .map(|ws: warp::ws::Ws, db: Arc<Database>| {
-            ws.on_upgrade(move |socket| websocket::handle_connection(socket, WhiteboardState::new(db)))
-        });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
 
-    let static_files = warp::path("static").and(warp::fs::dir("static"));
-    let index = warp::path::end().and(warp::fs::file("static/index.html"));
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrawAction {
+    pub color: String,
+    pub size: f32,
+    pub points: Vec<Point>,
+}
 
-    websocket_route.or(static_files).or(index)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ClientMessage {
+    Draw(DrawAction),
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServerMessage {
+    Update(Vec<DrawAction>),
+    Clear,
 }

@@ -1,96 +1,53 @@
-use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast;
+use crate::app::{ClientMessage, ServerMessage};
+use crate::whiteboard::Whiteboard;
+use futures::{FutureExt, SinkExt, StreamExt};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use warp::ws::{Message, WebSocket};
-use futures_util::{SinkExt, StreamExt};
-use crate::whiteboard::{WhiteboardAction, WhiteboardManager, DrawAction};
-use crate::database::Database;
-use serde_json::Value;
 
-pub struct WhiteboardState {
-    tx: broadcast::Sender<WhiteboardAction>,
-    manager: Arc<Mutex<WhiteboardManager>>,
-    db: Arc<Database>,
+pub async fn ws_handler(
+    ws: warp::ws::Ws,
+    whiteboard: Arc<Mutex<Whiteboard>>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    Ok(ws.on_upgrade(move |socket| client_connection(socket, whiteboard)))
 }
 
-impl WhiteboardState {
-    pub fn new(db: Arc<Database>) -> Arc<Self> {
-        let (tx, _) = broadcast::channel(100);
-        let manager = Arc::new(Mutex::new(WhiteboardManager::new(db.clone())));
-        Arc::new(WhiteboardState { tx, manager, db })
-    }
-}
+async fn client_connection(ws: WebSocket, whiteboard: Arc<Mutex<Whiteboard>>) {
+    let (mut client_ws_sender, mut client_ws_rcv) = ws.split();
 
-pub async fn handle_connection(ws: WebSocket, state: Arc<WhiteboardState>) {
-    let (mut ws_tx, mut ws_rx) = ws.split();
-    let mut rx = state.tx.subscribe();
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(69));
 
-    log::info!("New WebSocket connection established");
-
-    // Send initial state to the client
-    let initial_state = state.manager.lock().unwrap().get_current_state();
-    let initial_state_msg = serde_json::to_string(&WhiteboardAction::InitialState(initial_state)).unwrap();
-    if let Err(e) = ws_tx.send(Message::text(initial_state_msg)).await {
-        log::error!("Failed to send initial state: {}", e);
-        return;
-    }
-    log::info!("Sent initial state to client");
-
-    // Handle incoming messages
-    let state_clone = Arc::clone(&state);
-    tokio::task::spawn(async move {
-        while let Some(result) = ws_rx.next().await {
-            match result {
-                Ok(msg) => {
-                    if let Ok(text) = msg.to_str() {
-                        match serde_json::from_str::<Value>(text) {
-                            Ok(value) => {
-                                if let Some(action_type) = value.get("type") {
-                                    match action_type.as_str() {
-                                        Some("Draw") => {
-                                            if let Ok(draw_action) = serde_json::from_value::<DrawAction>(value) {
-                                                let action = WhiteboardAction::Draw(draw_action);
-                                                log::info!("Received action: {:?}", action);
-                                                state_clone.manager.lock().unwrap().apply_action(&action);
-                                                let _ = state_clone.tx.send(action);
-                                            } else {
-                                                log::warn!("Failed to parse Draw action: {}", text);
-                                            }
-                                        },
-                                        Some("Clear") => {
-                                            let action = WhiteboardAction::Clear;
-                                            log::info!("Received action: {:?}", action);
-                                            state_clone.manager.lock().unwrap().apply_action(&action);
-                                            let _ = state_clone.tx.send(action);
-                                        },
-                                        Some("Zoom") => {
-                                            if let Some(value) = value.get("value") {
-                                                if let Some(zoom) = value.as_f64() {
-                                                    let action = WhiteboardAction::Zoom(zoom);
-                                                    log::info!("Received action: {:?}", action);
-                                                    state_clone.manager.lock().unwrap().apply_action(&action);
-                                                    let _ = state_clone.tx.send(action);
-                                                } else {
-                                                    log::warn!("Invalid zoom value: {}", text);
-                                                }
-                                            } else {
-                                                log::warn!("Zoom action missing value: {}", text);
-                                            }
-                                        },
-                                        _ => log::warn!("Unknown action type: {}", text),
+    loop {
+        tokio::select! {
+            msg = client_ws_rcv.next().fuse() => {
+                match msg {
+                    Some(Ok(msg)) => {
+                        if let Ok(text) = msg.to_str() {
+                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(text) {
+                                let mut wb = whiteboard.lock().await;
+                                match client_msg {
+                                    ClientMessage::Draw(action) => {
+                                        wb.add_action(action);
                                     }
-                                } else {
-                                    log::warn!("Message missing 'type' field: {}", text);
+                                    ClientMessage::Clear => {
+                                        wb.clear();
+                                    }
                                 }
-                            },
-                            Err(e) => log::warn!("Failed to parse message as JSON: {}, Error: {}", text, e),
+                            }
                         }
                     }
+                    _ => break,
                 }
-                Err(e) => log::error!("WebSocket error: {}", e),
+            }
+            _ = interval.tick() => {
+                let wb = whiteboard.lock().await;
+                let actions = wb.get_actions();
+                let server_msg = ServerMessage::Update(actions);
+                let msg = serde_json::to_string(&server_msg).unwrap();
+                if let Err(_) = client_ws_sender.send(Message::text(msg)).await {
+                    break;
+                }
             }
         }
-        log::info!("WebSocket connection closed");
-    });
-
-    // Rest of the function remains the same...
+    }
 }

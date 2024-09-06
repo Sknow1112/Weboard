@@ -1,30 +1,31 @@
-# Weboard
-
-Weboard is a collaborative whiteboard application built with Rust and WebSocket technology. It allows multiple users to draw on an infinite canvas in real-time.
+Weboard is a real-time collaborative whiteboard application built with Rust and WebSockets. It allows multiple users to draw on a shared canvas simultaneously.
 
 ## Features
 
-- Real-time collaboration
-- Infinite canvas
-- Color selection (using color picker or hex input)
-- Eraser tool
-- Clear canvas option
-- Zoom in/out functionality
+- Real-time drawing synchronization
+- Color picker for choosing different colors
+- Adjustable pen size
+- Clear canvas functionality
+- Responsive design
 
 ## Running the Application
 
-1. Make sure you have Rust and Docker installed on your system.
+1. Make sure you have Rust and Cargo installed on your system.
 2. Clone this repository.
-3. Build the Docker image:
-   ```
-   docker build -t weboard .
-   ```
-4. Run the Docker container:
-   ```
-   docker run -p 7860:7860 weboard
-   ```
-5. Open your web browser and navigate to `http://localhost:7860`.
+3. Navigate to the project directory.
+4. Run `cargo build --release` to build the application.
+5. Run `cargo run --release` to start the server.
+6. Open a web browser and go to `http://localhost:7860` to use the whiteboard.
 
-## Contributing
+## Docker Deployment
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+To deploy the application using Docker:
+
+1. Build the Docker image: `docker build -t weboard .`
+2. Run the container: `docker run -p 7860:7860 weboard`
+
+The application will be accessible at `http://localhost:7860`.
+
+## License
+
+This project is open-source and available under the MIT License.

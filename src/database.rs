@@ -14,21 +14,22 @@ impl Database {
     pub fn save_action(&self, action: &DrawAction) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO actions (x, y, color, is_eraser) VALUES (?1, ?2, ?3, ?4)",
-            (action.x, action.y, &action.color, action.is_eraser),
+            "INSERT INTO actions (x, y, color, is_eraser, pen_size) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (action.x, action.y, &action.color, action.is_eraser, action.pen_size),
         )?;
         Ok(())
     }
 
     pub fn get_current_state(&self) -> Result<Vec<DrawAction>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT x, y, color, is_eraser FROM actions ORDER BY id")?;
+        let mut stmt = conn.prepare("SELECT x, y, color, is_eraser, pen_size FROM actions ORDER BY id")?;
         let actions = stmt.query_map([], |row| {
             Ok(DrawAction {
                 x: row.get(0)?,
                 y: row.get(1)?,
                 color: row.get(2)?,
                 is_eraser: row.get(3)?,
+                pen_size: row.get(4)?,
             })
         })?;
         actions.collect()
@@ -49,7 +50,8 @@ pub fn init_db() -> Result<Database> {
             x REAL NOT NULL,
             y REAL NOT NULL,
             color TEXT NOT NULL,
-            is_eraser BOOLEAN NOT NULL
+            is_eraser BOOLEAN NOT NULL,
+            pen_size REAL NOT NULL
         )",
         [],
     )?;

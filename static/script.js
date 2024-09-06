@@ -1,160 +1,121 @@
 const canvas = document.getElementById("whiteboard");
 const ctx = canvas.getContext("2d");
 const colorPicker = document.getElementById("color-picker");
-const colorInput = document.getElementById("color-input");
-const eraserButton = document.getElementById("eraser");
-const clearButton = document.getElementById("clear");
-const zoomSlider = document.getElementById("zoom");
+const sizeSlider = document.getElementById("size-slider");
+const clearBtn = document.getElementById("clear-btn");
 
 let isDrawing = false;
-let currentColor = "#000000";
-let isEraser = false;
-let zoom = 1;
-let offsetX = 0;
-let offsetY = 0;
+let currentPath = [];
 
-const socket = new WebSocket(`ws://${window.location.host}/ws`);
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight - 50;
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  redraw();
-}
+const ws = new WebSocket(`ws://${window.location.host}/ws`);
 
-function redraw() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  if (message.Update) {
+    redrawWhiteboard(message.Update);
+  } else if (message.Clear) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+};
+
+function redrawWhiteboard(actions) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(zoom, 0, 0, zoom, offsetX, offsetY);
+  for (const action of actions) {
+    drawPath(action);
+  }
 }
 
-window.addEventListener("resize", resize);
-resize();
+function drawPath(action) {
+  ctx.beginPath();
+  ctx.strokeStyle = action.color;
+  ctx.lineWidth = action.size;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (let i = 0; i < action.points.length; i++) {
+    const point = action.points[i];
+    if (i === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  }
+  ctx.stroke();
+}
 
 canvas.addEventListener("mousedown", startDrawing);
 canvas.addEventListener("mousemove", draw);
 canvas.addEventListener("mouseup", stopDrawing);
 canvas.addEventListener("mouseout", stopDrawing);
 
-colorPicker.addEventListener("change", (e) => {
-  currentColor = e.target.value;
-  isEraser = false;
-});
-
-colorInput.addEventListener("change", (e) => {
-  const hex = e.target.value.match(/^#?([a-f\d]{6})$/i);
-  if (hex) {
-    currentColor = `#${hex[1]}`;
-    colorPicker.value = currentColor;
-    isEraser = false;
-  }
-});
-
-eraserButton.addEventListener("click", () => {
-  isEraser = !isEraser;
-  eraserButton.textContent = isEraser ? "Draw" : "Eraser";
-});
-
-clearButton.addEventListener("click", () => {
-  socket.send(JSON.stringify({ type: "Clear" }));
-});
-
-zoomSlider.addEventListener("input", (e) => {
-  zoom = parseFloat(e.target.value);
-  redraw();
-  socket.send(JSON.stringify({ type: "Zoom", value: zoom }));
-});
-
 function startDrawing(e) {
   isDrawing = true;
-  draw(e);
+  currentPath = [];
+  const point = getPoint(e);
+  currentPath.push(point);
+  ctx.beginPath();
+  ctx.moveTo(point.x, point.y);
 }
 
 function draw(e) {
   if (!isDrawing) return;
 
-  const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left - offsetX) / zoom;
-  const y = (e.clientY - rect.top - offsetY) / zoom;
+  const point = getPoint(e);
+  currentPath.push(point);
 
-  ctx.lineWidth = isEraser ? 20 : 2;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = isEraser ? "#FFFFFF" : currentColor;
+  // Clear the canvas and redraw the current path
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  redrawWhiteboard([]); // Redraw all previous actions
+  drawCurrentPath();
+}
 
-  ctx.lineTo(x, y);
-  ctx.stroke();
+function drawCurrentPath() {
   ctx.beginPath();
-  ctx.moveTo(x, y);
-
-  socket.send(
-    JSON.stringify({
-      type: "Draw",
-      x,
-      y,
-      color: currentColor,
-      isEraser,
-    }),
-  );
+  ctx.strokeStyle = colorPicker.value;
+  ctx.lineWidth = sizeSlider.value;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (let i = 0; i < currentPath.length; i++) {
+    const point = currentPath[i];
+    if (i === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  }
+  ctx.stroke();
 }
 
 function stopDrawing() {
+  if (!isDrawing) return;
   isDrawing = false;
-  ctx.beginPath();
+
+  const action = {
+    color: colorPicker.value,
+    size: parseFloat(sizeSlider.value),
+    points: currentPath,
+  };
+
+  ws.send(JSON.stringify({ Draw: action }));
+  currentPath = [];
 }
 
-function drawAction(action) {
-  ctx.lineWidth = action.isEraser ? 20 : 2;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = action.isEraser ? "#FFFFFF" : action.color;
-  ctx.lineTo(action.x, action.y);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(action.x, action.y);
+function getPoint(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+  };
 }
 
-function calculateStateHash() {
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  return Array.from(imageData.data.values())
-    .reduce((acc, val) => acc + val, 0)
-    .toString(16);
-}
+clearBtn.addEventListener("click", () => {
+  ws.send(JSON.stringify({ Clear: null }));
+});
 
-socket.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-
-  switch (message.type) {
-    case "HANDSHAKE":
-      socket.send("ACK");
-      break;
-    case "VERIFY":
-      const clientHash = calculateStateHash();
-      if (clientHash !== message.hash) {
-        socket.send("STATE_MISMATCH");
-      }
-      break;
-    case "FULL_STATE":
-      redraw();
-      message.state.forEach(drawAction);
-      break;
-    case "Draw":
-      drawAction(message);
-      break;
-    case "Clear":
-      redraw();
-      break;
-    case "Zoom":
-      zoom = message.value;
-      zoomSlider.value = zoom;
-      redraw();
-      break;
-    default:
-      console.warn("Unknown message type:", message.type);
-  }
-};
-
-socket.onerror = (error) => {
-  console.error("WebSocket Error:", error);
-};
-
-socket.onclose = (event) => {
-  console.log("WebSocket connection closed:", event);
-};
+window.addEventListener("resize", () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - 50;
+  redrawWhiteboard([]);
+});
