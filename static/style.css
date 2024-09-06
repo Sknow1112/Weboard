@@ -6,8 +6,16 @@ body {
     height: 100vh;
 }
 
-#whiteboard {
+#canvas-container {
+    position: relative;
     flex-grow: 1;
+}
+
+#background-canvas,
+#drawing-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 #toolbar {

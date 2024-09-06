@@ -1,5 +1,7 @@
-const canvas = document.getElementById("whiteboard");
-const ctx = canvas.getContext("2d");
+const backgroundCanvas = document.getElementById("background-canvas");
+const drawingCanvas = document.getElementById("drawing-canvas");
+const bgCtx = backgroundCanvas.getContext("2d");
+const drawCtx = drawingCanvas.getContext("2d");
 const colorPicker = document.getElementById("color-picker");
 const sizeSlider = document.getElementById("size-slider");
 const clearBtn = document.getElementById("clear-btn");
@@ -7,8 +9,18 @@ const clearBtn = document.getElementById("clear-btn");
 let isDrawing = false;
 let currentPath = [];
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight - 50;
+function resizeCanvases() {
+  const container = document.getElementById("canvas-container");
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  backgroundCanvas.width = width;
+  backgroundCanvas.height = height;
+  drawingCanvas.width = width;
+  drawingCanvas.height = height;
+}
+
+resizeCanvases();
 
 const ws = new WebSocket(`ws://${window.location.host}/ws`);
 
@@ -17,46 +29,46 @@ ws.onmessage = (event) => {
   if (message.Update) {
     redrawWhiteboard(message.Update);
   } else if (message.Clear) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
   }
 };
 
 function redrawWhiteboard(actions) {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  bgCtx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
   for (const action of actions) {
-    drawPath(action);
+    drawPath(bgCtx, action);
   }
 }
 
-function drawPath(action) {
-  ctx.beginPath();
-  ctx.strokeStyle = action.color;
-  ctx.lineWidth = action.size;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+function drawPath(context, action) {
+  context.beginPath();
+  context.strokeStyle = action.color;
+  context.lineWidth = action.size;
+  context.lineCap = "round";
+  context.lineJoin = "round";
   for (let i = 0; i < action.points.length; i++) {
     const point = action.points[i];
     if (i === 0) {
-      ctx.moveTo(point.x, point.y);
+      context.moveTo(point.x, point.y);
     } else {
-      ctx.lineTo(point.x, point.y);
+      context.lineTo(point.x, point.y);
     }
   }
-  ctx.stroke();
+  context.stroke();
 }
 
-canvas.addEventListener("mousedown", startDrawing);
-canvas.addEventListener("mousemove", draw);
-canvas.addEventListener("mouseup", stopDrawing);
-canvas.addEventListener("mouseout", stopDrawing);
+drawingCanvas.addEventListener("mousedown", startDrawing);
+drawingCanvas.addEventListener("mousemove", draw);
+drawingCanvas.addEventListener("mouseup", stopDrawing);
+drawingCanvas.addEventListener("mouseout", stopDrawing);
 
 function startDrawing(e) {
   isDrawing = true;
   currentPath = [];
   const point = getPoint(e);
   currentPath.push(point);
-  ctx.beginPath();
-  ctx.moveTo(point.x, point.y);
+  drawCtx.beginPath();
+  drawCtx.moveTo(point.x, point.y);
 }
 
 function draw(e) {
@@ -65,27 +77,12 @@ function draw(e) {
   const point = getPoint(e);
   currentPath.push(point);
 
-  // Clear the canvas and redraw the current path
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  redrawWhiteboard([]); // Redraw all previous actions
-  drawCurrentPath();
-}
-
-function drawCurrentPath() {
-  ctx.beginPath();
-  ctx.strokeStyle = colorPicker.value;
-  ctx.lineWidth = sizeSlider.value;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  for (let i = 0; i < currentPath.length; i++) {
-    const point = currentPath[i];
-    if (i === 0) {
-      ctx.moveTo(point.x, point.y);
-    } else {
-      ctx.lineTo(point.x, point.y);
-    }
-  }
-  ctx.stroke();
+  drawCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  drawPath(drawCtx, {
+    color: colorPicker.value,
+    size: parseFloat(sizeSlider.value),
+    points: currentPath,
+  });
 }
 
 function stopDrawing() {
@@ -99,11 +96,13 @@ function stopDrawing() {
   };
 
   ws.send(JSON.stringify({ Draw: action }));
+  drawCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  drawPath(bgCtx, action);
   currentPath = [];
 }
 
 function getPoint(e) {
-  const rect = canvas.getBoundingClientRect();
+  const rect = drawingCanvas.getBoundingClientRect();
   return {
     x: e.clientX - rect.left,
     y: e.clientY - rect.top,
@@ -115,7 +114,6 @@ clearBtn.addEventListener("click", () => {
 });
 
 window.addEventListener("resize", () => {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight - 50;
+  resizeCanvases();
   redrawWhiteboard([]);
 });
